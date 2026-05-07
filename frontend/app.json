@@ -1,0 +1,17 @@
+{
+  "expo": {
+    "name":        "App Template",
+    "slug":        "app-template",
+    "version":     "1.0.0",
+    "orientation": "portrait",
+    "platforms":   ["ios", "android", "web"],
+    "scheme":      "app-template",
+    "web": {
+      "bundler": "metro"
+    },
+    "extra": {
+      "apiUrl":  "",
+      "appName": ""
+    }
+  }
+}
