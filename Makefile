@@ -3,50 +3,43 @@ APP_NAME ?= $(shell basename $(CURDIR))
 # Load .env if it exists (init target creates it)
 -include .env
 
-PROJECT    := $(GCP_PROJECT_ID)
-REGION     := $(or $(GCP_REGION),us-central1)
-FUNCTION   := $(APP_NAME)
+PROJECT  := $(GCP_PROJECT_ID)
+REGION   := $(or $(GCP_REGION),us-central1)
+FUNCTION := $(APP_NAME)
 
 .PHONY: init login setup deploy dev destroy check-env check-gcloud
 
-## Interactive setup: asks for Google Client ID and writes .env
+## Generate access code + write .env (run once)
 init:
 	@if [ -f .env ]; then echo ".env already exists — delete it and re-run to reset"; exit 0; fi
+	$(eval KEY := $(shell openssl rand -hex 16))
+	@printf 'GCP_PROJECT_ID=matan-app-zoo\nGCP_REGION=us-central1\nMASTER_KEY=%s\n' "$(KEY)" > .env
 	@echo ""
-	@echo "  Open this URL in your browser:"
-	@echo "  https://console.cloud.google.com/apis/credentials?project=matan-app-zoo"
+	@echo "✓ .env created with a random access code."
 	@echo ""
-	@echo "  → Create Credentials → OAuth 2.0 Client ID"
-	@echo "  → Type: Web application"
-	@echo "  → Authorised JavaScript origins: http://localhost:19006"
-	@echo "  → Authorised redirect URIs:      http://localhost:19006"
-	@echo "                                   https://auth.expo.io/@matanw/$(APP_NAME)"
+	@echo "  Your access code (enter this in the app on first launch):"
+	@echo "  $(KEY)"
 	@echo ""
-	@printf "Paste your Client ID: " && read CLIENT_ID && \
-	printf 'GCP_PROJECT_ID=matan-app-zoo\nGCP_REGION=us-central1\nGOOGLE_CLIENT_ID=%s\nALLOWED_USERS=matanwis@gmail.com\nALLOW_ALL=false\nALLOW_DEVICE_AUTH=false\n' "$$CLIENT_ID" > .env && \
-	echo "" && echo "✓ .env created. Run: make setup"
+	@echo "  Save it somewhere safe — it won't be shown again."
+	@echo "  Run: make setup"
 
 check-env:
-	@test -n "$(PROJECT)"          || (echo "" && echo "ERROR: GCP_PROJECT_ID not set — run: make init" && echo "" && exit 1)
-	@test -n "$(GOOGLE_CLIENT_ID)" || (echo "" && echo "ERROR: GOOGLE_CLIENT_ID not set — run: make init" && echo "" && exit 1)
+	@test -n "$(PROJECT)"    || (echo "" && echo "ERROR: GCP_PROJECT_ID not set — run: make init" && echo "" && exit 1)
+	@test -n "$(MASTER_KEY)" || (echo "" && echo "ERROR: MASTER_KEY not set — run: make init" && echo "" && exit 1)
 
 check-gcloud:
 	@command -v gcloud >/dev/null 2>&1 || { \
 		echo ""; \
 		echo "ERROR: gcloud is not installed."; \
-		echo "  Install it: https://cloud.google.com/sdk/docs/install"; \
-		echo "  Or via brew:  brew install --cask google-cloud-sdk"; \
+		echo "  Install via brew:  brew install --cask google-cloud-sdk"; \
 		echo ""; \
 		exit 1; \
 	}
 	@gcloud auth application-default print-access-token >/dev/null 2>&1 || { \
 		echo ""; \
-		echo "ERROR: GCP credentials not found. Run these two commands:"; \
+		echo "ERROR: GCP credentials not found. Run:"; \
 		echo ""; \
-		echo "  gcloud auth login"; \
-		echo "  gcloud auth application-default login"; \
-		echo ""; \
-		echo "Then re-run: make setup"; \
+		echo "  make login"; \
 		echo ""; \
 		exit 1; \
 	}
@@ -84,19 +77,18 @@ deploy: check-env
 		--trigger-http \
 		--allow-unauthenticated \
 		--service-account=$(SA) \
-		--set-env-vars="BUCKET_NAME=$(BUCKET),APP_NAME=$(APP_NAME),GOOGLE_CLIENT_ID=$(GOOGLE_CLIENT_ID),ALLOWED_USERS=$(ALLOWED_USERS),ALLOW_ALL=$(ALLOW_ALL),ALLOW_DEVICE_AUTH=$(ALLOW_DEVICE_AUTH)" \
+		--set-env-vars="BUCKET_NAME=$(BUCKET),APP_NAME=$(APP_NAME),MASTER_KEY=$(MASTER_KEY)" \
 		--project=$(PROJECT)
 	@echo ""
 	@echo "✓ Function deployed:"
 	@cd terraform && terraform output -raw function_url
 	@echo ""
 
-## Start Expo dev server (auto-writes frontend/.env.local)
+## Start Expo dev server
 dev: check-env
 	$(eval FURL := $(shell cd terraform && terraform output -raw function_url 2>/dev/null || echo "http://localhost:8080"))
-	@printf 'EXPO_PUBLIC_API_URL=%s\nEXPO_PUBLIC_APP_NAME=%s\nEXPO_PUBLIC_GOOGLE_CLIENT_ID=%s\n' \
-		"$(FURL)" "$(APP_NAME)" "$(GOOGLE_CLIENT_ID)" > frontend/.env.local
-	cd frontend && npm install --silent && npx expo start --tunnel --port 19006
+	@printf 'EXPO_PUBLIC_API_URL=%s\nEXPO_PUBLIC_MASTER_KEY=%s\n' "$(FURL)" "$(MASTER_KEY)" > frontend/.env.local
+	cd frontend && npm install --silent && npx expo start --tunnel --port 19006 --clear
 
 ## Tear down ALL infrastructure for this app (irreversible)
 destroy: check-env
